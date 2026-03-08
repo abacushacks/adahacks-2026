@@ -25,9 +25,8 @@ Over **55 million** people worldwide live with dementia, projected to hit **139 
 
 ## Demo
 
-<a name="demo"></a>
+<a name="demo" href="https://youtu.be/tpLn02QgaQ4?si=HXSsycMFcGwN-9Xw">Click here to view demo.</a>
 
->  *Demo video coming soon*
 
 ## Features
 
