@@ -201,8 +201,55 @@ class AudioConsumer(AsyncWebsocketConsumer):
         if len(self.transcription_history) > constants.MAX_TRANSCRIPTION_HISTORY:
             self.transcription_history.pop(0)
 
-        # Extract name from speech and update face
-        await self._check_for_name_introduction(text)
+        # Extract name/relationship and key info in PARALLEL for speed
+        await asyncio.gather(
+            self._check_for_name_introduction(text),
+            self._extract_and_push_key_info(text)
+        )
+
+    async def _extract_and_push_key_info(self, text: str) -> None:
+        """
+        Extracts important details from transcription and updates the face popup in real-time.
+        """
+        if len(self.active_faces) != 1:
+            return
+
+        target_label = self.active_faces[0]
+        face_id = self.label_to_face_id.get(target_label)
+        if not face_id:
+            return
+
+        try:
+            face = await sync_to_async(lambda: Face.objects.filter(id=face_id).first())()
+            if not face:
+                return
+
+            existing_metadata = face.metadata if isinstance(face.metadata, list) else []
+
+            # Ask LLM to extract key info — returns the FULL updated list
+            updated_items = await ZenService.extract_key_info(text, existing_metadata)
+
+            # If LLM returned nothing or same list, skip
+            if updated_items is None or updated_items == existing_metadata:
+                return
+
+            # Keep max 10 items
+            updated_metadata = updated_items[-10:]
+            face.metadata = updated_metadata
+            await sync_to_async(face.save)(update_fields=['metadata'])
+            logger.info(f"Key info updated for '{target_label}': {updated_metadata}")
+
+            # Push the live update to frontend
+            await self.send(text_data=json.dumps({
+                'type': 'face_recognized',
+                'label': target_label,
+                'name': face.name or target_label,
+                'metadata': updated_metadata,
+                'relationship': face.relationship or 'Known Person',
+                'context': ''
+            }))
+        except Exception as e:
+            logger.exception(f"Error extracting key info: {e}")
 
     async def _check_for_name_introduction(self, text: str) -> None:
         """
@@ -221,43 +268,44 @@ class AudioConsumer(AsyncWebsocketConsumer):
 
         parsed_data = await ZenService.parse_name_from_text(text)
         name = parsed_data.get('name')
+        relationship = parsed_data.get('relationship')
         
-        if not name:
+        if not name and not relationship:
             return
 
-        logger.info(f"Name detected: '{name}' for face '{target_label}' (ID: {face_id})")
+        logger.info(f"Parsed from speech — name: '{name}', relationship: '{relationship}' for face '{target_label}'")
 
         try:
-            # Find the face by ID and update its name
             face = await sync_to_async(lambda: Face.objects.filter(id=face_id).first())()
             if not face:
                 return
 
-            face.name = name
-            await sync_to_async(face.save)(update_fields=['name'])
-            logger.info(f"Updated face '{target_label}' name to '{name}'")
+            update_fields = []
 
-            # Re-run Zen with the new name for better context
-            zen_context = await ZenService.get_context(face)
-            relationship = zen_context.get('relationship', face.relationship or 'Known Person')
-            context = zen_context.get('context', 'No recent conversations recorded.')
+            if name:
+                face.name = name
+                update_fields.append('name')
+                logger.info(f"Updated face '{target_label}' name to '{name}'")
 
-            # Save relationship if updated
-            if relationship and relationship != face.relationship:
+            if relationship:
                 face.relationship = relationship
-                await sync_to_async(face.save)(update_fields=['relationship'])
+                update_fields.append('relationship')
+                logger.info(f"Updated face '{target_label}' relationship to '{relationship}'")
+
+            if update_fields:
+                await sync_to_async(face.save)(update_fields=update_fields)
 
             # Push the update to the frontend
             await self.send(text_data=json.dumps({
                 'type': 'face_recognized',
                 'label': target_label,
-                'name': name,
+                'name': face.name or target_label,
                 'metadata': face.metadata or [],
-                'relationship': relationship,
-                'context': context
+                'relationship': face.relationship or 'Known Person',
+                'context': ''
             }))
         except Exception as e:
-            logger.exception(f"Error updating face name: {e}")
+            logger.exception(f"Error updating face name/relationship: {e}")
 
     async def handle_face_descriptor(self, data: Dict[str, Any]) -> None:
         """
@@ -276,18 +324,23 @@ class AudioConsumer(AsyncWebsocketConsumer):
                 self.label_to_face_id[label] = existing_face.id
                 # Use stored relationship if available, otherwise call Zen and save it
                 if existing_face.relationship:
-                    # Use stored relationship, still get fresh context from Zen
-                    zen_context = await ZenService.get_context(existing_face)
+                    # Already cached — no API call needed
                     relationship = existing_face.relationship
-                    context = zen_context.get('context', 'No recent conversations recorded.')
+                    context = f"Previously identified as {existing_face.name or label}."
                 else:
                     # First time — call Zen and save relationship to DB
                     zen_context = await ZenService.get_context(existing_face)
                     relationship = zen_context.get('relationship', 'Known Person')
                     context = zen_context.get('context', 'No recent conversations recorded.')
-                    # Persist relationship to DB
-                    existing_face.relationship = relationship
-                    await sync_to_async(existing_face.save)(update_fields=['relationship'])
+                    # Re-read face from DB in case speech updated relationship during the Zen call
+                    fresh_face = await sync_to_async(lambda: Face.objects.filter(id=existing_face.id).first())()
+                    if fresh_face and fresh_face.relationship:
+                        # Speech already set the relationship — use that instead
+                        relationship = fresh_face.relationship
+                    else:
+                        # Persist Zen's relationship to DB
+                        existing_face.relationship = relationship
+                        await sync_to_async(existing_face.save)(update_fields=['relationship'])
                 
                 await self.send(text_data=json.dumps({
                     'type': 'face_recognized',

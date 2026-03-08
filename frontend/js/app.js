@@ -85,6 +85,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
 
+        // Send active face labels to backend so it knows who's on screen
+        const currentLabels = Array.from(detectedLabels).filter(l => l !== 'unknown').sort();
+        const labelsKey = currentLabels.join(',');
+        if (labelsKey !== renderLoop._lastLabelsKey) {
+            renderLoop._lastLabelsKey = labelsKey;
+            if (audioManager.socket && audioManager.socket.readyState === WebSocket.OPEN) {
+                audioManager.socket.send(JSON.stringify({
+                    type: 'active_faces',
+                    labels: currentLabels
+                }));
+            }
+        }
+
         faceTracker.currentDetections.forEach(detection => {
             const { x, y, width, height } = detection.box;
             const scaledX = x * scaleX + offsetX;

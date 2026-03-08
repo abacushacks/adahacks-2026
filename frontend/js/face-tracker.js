@@ -46,9 +46,14 @@ class FaceTracker {
         const name = data.name || label;
         const relationship = data.relationship || '';
         const context = data.context || '';
+        const metadata = Array.isArray(data.metadata) ? data.metadata : [];
 
         const relationshipBadge = relationship
             ? `<span class="popup-relationship-badge">${relationship}</span>`
+            : '';
+
+        const keyInfoHtml = metadata.length > 0
+            ? `<ul class="popup-key-info">${metadata.map(i => `<li>${i}</li>`).join('')}</ul>`
             : '';
 
         popup.innerHTML = `
@@ -57,6 +62,7 @@ class FaceTracker {
                 ${relationshipBadge}
             </div>
             <div class="popup-context">${context || 'Analyzing...'}</div>
+            ${keyInfoHtml}
         `;
         this.popupsContainer.appendChild(popup);
         this.activePopups.set(label, popup);
@@ -97,6 +103,20 @@ class FaceTracker {
                 } else if (badge) {
                     badge.remove();
                 }
+            }
+
+            // Update key info list
+            const metadataItems = Array.isArray(metadata) ? metadata : [];
+            let keyInfoList = popup.querySelector('.popup-key-info');
+            if (metadataItems.length > 0) {
+                if (!keyInfoList) {
+                    keyInfoList = document.createElement('ul');
+                    keyInfoList.className = 'popup-key-info';
+                    popup.appendChild(keyInfoList);
+                }
+                keyInfoList.innerHTML = metadataItems.map(i => `<li>${i}</li>`).join('');
+            } else if (keyInfoList) {
+                keyInfoList.remove();
             }
         }
     }

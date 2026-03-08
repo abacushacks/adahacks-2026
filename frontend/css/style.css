@@ -68,6 +68,30 @@ html {
     line-height: 1.5;
 }
 
+.popup-key-info {
+    margin: 10px 0 0 0;
+    padding: 10px 0 0 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    list-style: none;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.popup-key-info li {
+    position: relative;
+    padding-left: 16px;
+    margin-bottom: 6px;
+    line-height: 1.4;
+}
+
+.popup-key-info li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: #2a9d8f;
+    font-weight: bold;
+}
+
 #controls {
     position: absolute;
     top: 10px;

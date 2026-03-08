@@ -87,13 +87,23 @@ Respond ONLY with valid JSON in this exact format, no markdown, no code fences:
 
     @classmethod
     def _build_name_parsing_prompt(cls, text: str) -> str:
-        """Builds the prompt for Zen to parse a name from text."""
-        return f"""Extract the name of the person who is introducing themselves in the following transcription.
-Look for phrases like 'I am...', 'My name is...', 'I'm...'. 
-If a person is stating their name, respond with a JSON object: {{"name": "the_parsed_name"}}. 
-If no name is being introduced, return {{"name": ""}}.
-Respond ONLY with valid JSON in this exact format, no markdown, no code fences:
-Transcription: {text}"""
+        """Builds the prompt for Zen to parse name and relationship from text."""
+        return (
+            "Analyze this transcription for two things:\n"
+            "1. Is someone introducing themselves by name? (e.g. 'My name is...', 'I\\'m...', 'Call me...')\n"
+            "2. Is someone stating their relationship? (e.g. 'I\\'m your father', 'I am your son', 'We are friends', 'I\\'m your doctor')\n"
+            "\n"
+            "Respond ONLY with valid JSON, no markdown:\n"
+            "{\"name\": \"extracted name or empty string\", \"relationship\": \"extracted relationship or empty string\"}\n"
+            "\n"
+            "Examples:\n"
+            "- 'My name is John' -> {\"name\": \"John\", \"relationship\": \"\"}\n"
+            "- 'I am your father' -> {\"name\": \"\", \"relationship\": \"Father\"}\n"
+            "- 'Hi I\\'m Sarah, your nurse' -> {\"name\": \"Sarah\", \"relationship\": \"Nurse\"}\n"
+            "- 'How are you today' -> {\"name\": \"\", \"relationship\": \"\"}\n"
+            "\n"
+            f"Transcription: \"{text}\""
+        )
 
     @classmethod
     def _call_zen_to_parse_name(cls, text: str) -> Optional[Dict[str, str]]:
@@ -115,7 +125,8 @@ Transcription: {text}"""
             response_text = response.choices[0].message.content.strip()
             result = json.loads(response_text)
             return {
-                'name': result.get('name', '')
+                'name': result.get('name', ''),
+                'relationship': result.get('relationship', '')
             }
         except json.JSONDecodeError:
             logger.error(f"Zen returned non-JSON response for name parsing: {response_text[:200]}")
@@ -139,7 +150,7 @@ Transcription: {text}"""
         except Exception as e:
             logger.exception(f"Error parsing name from Zen: {e}")
 
-        return {'name': ''}
+        return {'name': '', 'relationship': ''}
 
     @classmethod
     async def get_context(cls, face) -> Dict[str, str]:
@@ -166,3 +177,74 @@ Transcription: {text}"""
             'relationship': 'Known Person',
             'context': 'No recent conversations recorded.'
         }
+
+    @classmethod
+    def _build_key_info_prompt(cls, text: str, existing_items: list) -> str:
+        """Builds prompt to extract key info from a transcription."""
+        existing_str = json.dumps(existing_items) if existing_items else "[]"
+        return f"""You are a real-time memory aid for a person with dementia. You are listening to their conversation.
+
+Your job: maintain a list of important, memorable details. You will be given what was just said AND the current list of recorded items.
+
+IMPORTANT RULES:
+- If new info UPDATES or CORRECTS an existing item, REPLACE the old one (e.g. if birthday changes, remove the old birthday and add the new one)
+- Add genuinely new important details (dates, people, places, events, health, plans)
+- Remove nothing unless it is being corrected/updated by new info
+- Keep each item to ONE short sentence (under 12 words)
+- Do NOT add greetings, filler, small talk, or trivial chat
+- Use warm, simple language
+
+Current recorded items: {existing_str}
+
+What was just said: "{text}"
+
+Respond ONLY with valid JSON containing the FULL updated list:
+{{"items": ["item 1", "item 2", ...]}}
+If nothing changed, return the existing list as-is.
+If nothing important and list is empty: {{"items": []}}"""
+
+    @classmethod
+    def _call_zen_extract_key_info(cls, text: str, existing_items: list) -> Optional[list]:
+        """Synchronous call to extract key info from transcription."""
+        client = cls._get_client()
+        if client is None:
+            return None
+
+        prompt = cls._build_key_info_prompt(text, existing_items)
+        try:
+            response = client.chat.completions.create(
+                model="kimi-k2.5",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that responds in JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            response_text = response.choices[0].message.content.strip()
+            result = json.loads(response_text)
+            items = result.get('items', [])
+            # Only return non-empty strings
+            return [item for item in items if item and isinstance(item, str)]
+        except json.JSONDecodeError:
+            logger.error(f"Zen returned non-JSON for key info: {response_text[:200]}")
+            return None
+        except Exception as e:
+            logger.exception(f"Zen key info extraction failed: {e}")
+            return None
+
+    @classmethod
+    async def extract_key_info(cls, text: str, existing_items: list = None) -> list:
+        """Async wrapper for key info extraction."""
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                _zen_executor,
+                cls._call_zen_extract_key_info,
+                text,
+                existing_items or []
+            )
+            if result:
+                return result
+        except Exception as e:
+            logger.exception(f"Error extracting key info: {e}")
+        return []
