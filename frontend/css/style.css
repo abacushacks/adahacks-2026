@@ -1,0 +1,113 @@
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: black;
+}
+
+#video {
+    position: absolute;
+    visibility: hidden;
+}
+
+#canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+}
+
+.face-popup {
+    position: absolute;
+    background: rgba(18, 25, 23, 0.95); /* Deep dark forest green/black as in the image */
+    color: white;
+    padding: 20px;
+    border-radius: 15px;
+    font-family: 'Inter', Arial, sans-serif;
+    z-index: 50;
+    pointer-events: none;
+    width: 250px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.8);
+}
+
+.popup-header {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 8px;
+}
+
+.popup-name {
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+.popup-status {
+    color: #dfb15b; /* Golden color from image */
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 12px;
+}
+
+.popup-memories {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.popup-memories li {
+    position: relative;
+    padding-left: 20px;
+    margin-bottom: 8px;
+}
+
+.popup-memories li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+#controls {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 100;
+    color: white;
+    background: rgba(0,0,0,0.5);
+    padding: 10px;
+    border-radius: 5px;
+    font-family: Arial, sans-serif;
+}
+
+#controls label {
+    font-size: 14px;
+}
+
+#holdTime {
+    width: 60px;
+    background: #333;
+    color: white;
+    border: 1px solid #555;
+    padding: 2px 5px;
+    border-radius: 3px;
+}
+
+#gateStatus {
+    margin-top: 5px;
+    font-size: 14px;
+}
+
+#gateIndicator {
+    color: #ff4444;
+    font-weight: bold;
+}
