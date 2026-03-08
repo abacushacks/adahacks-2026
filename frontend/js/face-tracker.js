@@ -44,7 +44,7 @@ class FaceTracker {
         // popup.style.borderColor = detection.color; // Removing direct border color if we want to follow the image style which has a darker border or no border
         
         const data = this.personData[label] || this.personData['default'];
-        const name = data.name || label;
+        const name = data.name || 'Identifying...';
         const metadata = Array.isArray(data.metadata) ? data.metadata : (data.metadata ? [data.metadata] : []);
 
         popup.innerHTML = `
@@ -177,7 +177,7 @@ class FaceTracker {
             
             if (tempMatch.count > 10) {
                 color = this.colors[this.colorIdx % this.colors.length];
-                label = `Person ${this.colorIdx + 1}`;
+                label = crypto.randomUUID(); // Use a unique ID instead of "Person X"
                 this.colorIdx++;
                 this.labeledDescriptors.push({ 
                     label: label, 
