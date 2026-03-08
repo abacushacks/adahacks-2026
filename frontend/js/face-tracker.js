@@ -19,7 +19,7 @@ class FaceTracker {
         this.lipOpeningThreshold = 0.05;
 
         this.personData = {
-            'default': { name: 'Identifying...', metadata: ['Profile loading...'], relationship: '' }
+            'default': { name: 'Identifying...', metadata: [], relationship: '' }
         };
 
         this.popupsContainer = document.getElementById('popups-container');
@@ -45,14 +45,10 @@ class FaceTracker {
         const data = this.personData[label] || this.personData['default'];
         const name = data.name || label;
         const relationship = data.relationship || '';
-        const metadata = Array.isArray(data.metadata) ? data.metadata : [];
+        const metadata = data.metadata;
 
         const relationshipBadge = relationship
             ? `<span class="popup-relationship-badge">${relationship}</span>`
-            : '';
-
-        const keyInfoHtml = metadata.length > 0
-            ? `<ul class="popup-key-info">${metadata.map(i => `<li>${i}</li>`).join('')}</ul>`
             : '';
 
         popup.innerHTML = `
@@ -60,10 +56,31 @@ class FaceTracker {
                 <span class="popup-name">${name}</span>
                 ${relationshipBadge}
             </div>
-            ${keyInfoHtml}
+            <div class="popup-metadata-container"></div>
         `;
         this.popupsContainer.appendChild(popup);
         this.activePopups.set(label, popup);
+        
+        this.renderMetadata(popup, metadata);
+    }
+
+    renderMetadata(popup, metadata) {
+        let container = popup.querySelector('.popup-metadata-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'popup-metadata-container';
+            popup.appendChild(container);
+        }
+
+        const metadataItems = Array.isArray(metadata) 
+            ? metadata.filter(i => i && String(i).trim().length > 0) 
+            : [];
+
+        if (metadataItems.length > 0) {
+            container.innerHTML = `<ul class="popup-key-info">${metadataItems.map(i => `<li>${i}</li>`).join('')}</ul>`;
+        } else {
+            container.innerHTML = `<div class="popup-learning-context">Learning from context</div>`;
+        }
     }
 
     updatePersonData(label, name, metadata, relationship) {
@@ -99,19 +116,8 @@ class FaceTracker {
                 }
             }
 
-            // Update key info list
-            const metadataItems = Array.isArray(metadata) ? metadata : [];
-            let keyInfoList = popup.querySelector('.popup-key-info');
-            if (metadataItems.length > 0) {
-                if (!keyInfoList) {
-                    keyInfoList = document.createElement('ul');
-                    keyInfoList.className = 'popup-key-info';
-                    popup.appendChild(keyInfoList);
-                }
-                keyInfoList.innerHTML = metadataItems.map(i => `<li>${i}</li>`).join('');
-            } else if (keyInfoList) {
-                keyInfoList.remove();
-            }
+            // Update metadata section
+            this.renderMetadata(popup, metadata);
         }
     }
 

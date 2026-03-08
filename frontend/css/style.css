@@ -98,10 +98,15 @@ html {
 }
 
 
-.popup-key-info {
+.popup-metadata-container {
     margin: 10px 0 0 0;
     padding: 10px 0 0 0;
     border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.popup-key-info {
+    margin: 0;
+    padding: 0;
     list-style: none;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.8);
@@ -120,6 +125,19 @@ html {
     left: 0;
     color: #2a9d8f;
     font-weight: bold;
+}
+
+.popup-learning-context {
+    margin: 0;
+    padding: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    animation: pulse-opacity 3s infinite ease-in-out;
+}
+
+@keyframes pulse-opacity {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
 }
 
 #controls {
