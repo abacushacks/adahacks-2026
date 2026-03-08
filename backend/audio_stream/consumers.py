@@ -5,6 +5,7 @@ import numpy as np
 from typing import List, Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 from channels.generic.websocket import AsyncWebsocketConsumer
+from asgiref.sync import sync_to_async
 
 from . import constants
 from .services import AudioProcessingService, TranscriptionService, FaceService
@@ -208,16 +209,28 @@ class AudioConsumer(AsyncWebsocketConsumer):
             existing_face = await FaceService.find_existing_face(descriptor)
             
             if existing_face:
-                # Enrich metadata with Gemini LLM
-                gemini_context = await GeminiService.get_context(existing_face)
+                # Use stored relationship if available, otherwise call Gemini and save it
+                if existing_face.relationship:
+                    # Use stored relationship, still get fresh context from Gemini
+                    gemini_context = await GeminiService.get_context(existing_face)
+                    relationship = existing_face.relationship
+                    context = gemini_context.get('context', 'No recent conversations recorded.')
+                else:
+                    # First time — call Gemini and save relationship to DB
+                    gemini_context = await GeminiService.get_context(existing_face)
+                    relationship = gemini_context.get('relationship', 'Known Person')
+                    context = gemini_context.get('context', 'No recent conversations recorded.')
+                    # Persist relationship to DB
+                    existing_face.relationship = relationship
+                    await sync_to_async(existing_face.save)(update_fields=['relationship'])
                 
                 await self.send(text_data=json.dumps({
                     'type': 'face_recognized',
                     'label': label,
                     'name': existing_face.name or label,
                     'metadata': existing_face.metadata or [],
-                    'relationship': gemini_context.get('relationship', 'Known Person'),
-                    'context': gemini_context.get('context', 'No recent conversations recorded.')
+                    'relationship': relationship,
+                    'context': context
                 }))
             else:
                 await FaceService.create_face(label, descriptor)
