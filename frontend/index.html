@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Face Tracking</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+        }
+
+        #video {
+            position: absolute;
+            visibility: hidden;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+        }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        async function setup() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model';
+            await Promise.all([
+                faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+                faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+            ]);
+
+            // Setup Webcam
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 1280, height: 720 },
+                    audio: true 
+                });
+                // console.log("[Audio] Stream tracks at setup:", stream.getAudioTracks().map(t => `${t.label} (enabled: ${t.enabled}, state: ${t.readyState})`));
+            } catch (err) {
+                console.error("[Audio] getUserMedia error:", err);
+                alert("Camera/Microphone access is required");
+                return;
+            }
+            video.srcObject = stream;
+
+            // Audio WebSocket Setup
+            const socket = new WebSocket('ws://localhost:8000/ws/audio/');
+            let audioContext;
+            
+            socket.onopen = () => {
+                // console.log("[WebSocket] Connected to backend");
+                
+                // Add a simple interaction to ensure AudioContext starts
+                const startAudio = async () => {
+                    // console.log("[Audio] Attempting to start AudioContext...");
+                    if (audioContext && audioContext.state === 'running') {
+                        // console.log("[Audio] AudioContext already running");
+                        return;
+                    }
+                    
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+                    // console.log("[Audio] AudioContext state:", audioContext.state);
+                    // console.log("[Audio] AudioContext sample rate:", audioContext.sampleRate);
+                    
+                    // Send sample rate to backend
+                    socket.send(JSON.stringify({
+                        type: 'config',
+                        sampleRate: audioContext.sampleRate
+                    }));
+
+                    let audioStream = stream;
+                    let audioTracks = audioStream.getAudioTracks();
+                    // console.log("[Audio] MediaStream tracks at start:", audioTracks.map(t => `${t.label} (enabled: ${t.enabled}, state: ${t.readyState})`));
+                    
+                    if (audioTracks.length === 0 || audioTracks[0].readyState === 'ended') {
+                        // console.warn("[Audio] No active audio tracks found, requesting fresh stream...");
+                        try {
+                            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                            // console.log("[Audio] Fresh audio stream acquired");
+                        } catch (err) {
+                            console.error("[Audio] Could not acquire fresh audio stream:", err);
+                        }
+                    }
+
+                    const source = audioContext.createMediaStreamSource(audioStream);
+                    const processor = audioContext.createScriptProcessor(2048, 1, 1);
+
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
+
+                    let chunkCount = 0;
+                    processor.onaudioprocess = (e) => {
+                        if (socket.readyState === WebSocket.OPEN) {
+                            const inputData = e.inputBuffer.getChannelData(0);
+                            
+                            // Check for any non-zero signal
+                            let hasSignal = false;
+                            for (let i = 0; i < inputData.length; i++) {
+                                if (inputData[i] !== 0) {
+                                    hasSignal = true;
+                                    break;
+                                }
+                            }
+                            // if (!hasSignal && chunkCount % 100 === 0) {
+                            //     console.warn("[Audio] Sending silent chunk (all zeros)");
+                            // } else if (hasSignal && chunkCount % 100 === 0) {
+                            //     console.log("[Audio] Sending chunk with signal");
+                            // }
+
+                            socket.send(inputData);
+                            chunkCount++;
+                            // if (chunkCount % 50 === 0) {
+                            //     console.log(`[Audio] Sent ${chunkCount} chunks to backend`);
+                            // }
+                        } else {
+                            // console.warn("[WebSocket] Socket not open, state:", socket.readyState);
+                        }
+                    };
+                    // console.log("[Audio] Capture started and processor connected");
+                    window.removeEventListener('mousedown', startAudio);
+                };
+
+                window.addEventListener('mousedown', startAudio);
+                // console.log("[Audio] Click anywhere on the page to start audio streaming");
+            };
+
+            socket.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'transcription') {
+                        console.log("[Whisper] " + data.text);
+                    }
+                } catch (err) {
+                    // Not a JSON message, might be binary or something else
+                }
+            };
+
+            socket.onclose = () => {
+                // console.log("[WebSocket] Disconnected from backend");
+            };
+
+            socket.onerror = (err) => {
+                // console.error("[WebSocket] Error:", err);
+                // console.log("[WebSocket] Connection state:", socket.readyState);
+                if (socket.readyState === WebSocket.CLOSED) {
+                    // console.error("[WebSocket] Connection failed. Is the Django server running at ws://localhost:8000/ws/audio/?");
+                }
+            };
+
+            video.addEventListener('play', () => {
+                let currentDetections = [];
+                let lastDetections = []; // For smoothing
+                const labeledDescriptors = []; // Stores { label, descriptors: Float32Array[], color }
+                let temporaryTrackings = []; // { descriptor, count }
+                const colors = ['#00ff00', '#ff0000', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffa500', '#800080'];
+                let colorIdx = 0;
+                let faceMatcher = null;
+
+                // Tracking callbacks
+                const onFaceEntered = (detection) => {
+                    // console.log(`[Face Entered] ID: ${detection.label}, Color: ${detection.color}`);
+                };
+                const onFaceTracked = (detection) => {
+                    // console.log(`[Face Tracked] ID: ${detection.label}`);
+                };
+                const onFaceLeft = (label) => {
+                    // console.log(`[Face Left] ID: ${label}`);
+                };
+
+                let activeFaceLabels = new Set(); // Currently tracked and confirmed faces
+                const facePresenceGrace = new Map(); // label -> count (to prevent flickering onFaceLeft)
+
+                async function detect() {
+                    if (video.paused || video.ended) return;
+                    try {
+                        const detections = await faceapi.detectAllFaces(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+                            .withFaceLandmarks()
+                            .withFaceDescriptors();
+                        
+                        // Update FaceMatcher when new labeled descriptors are added
+                        if (labeledDescriptors.length > 0) {
+                            const labeledFaceDescriptors = labeledDescriptors.map(ld => 
+                                new faceapi.LabeledFaceDescriptors(ld.label, ld.descriptors)
+                            );
+                            faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
+                        }
+
+                        const newDetections = detections.map(d => {
+                            let color = '#ffffff';
+                            let label = 'unknown';
+
+                            if (faceMatcher && labeledDescriptors.length > 0) {
+                                const bestMatch = faceMatcher.findBestMatch(d.descriptor);
+                                label = bestMatch.label;
+                                
+                                if (label !== 'unknown') {
+                                    const person = labeledDescriptors.find(ld => ld.label === label);
+                                    color = person.color;
+                                    // Periodically update descriptors to capture pose changes (keep up to 15)
+                                    if (person.descriptors.length < 15 && Math.random() > 0.8) {
+                                        person.descriptors.push(d.descriptor);
+                                    }
+                                }
+                            }
+
+                            if (label === 'unknown') {
+                                // Temporal confirmation: find matching person in temporary trackings
+                                let tempMatch = temporaryTrackings.find(t => {
+                                    const dist = faceapi.euclideanDistance(d.descriptor, t.descriptor);
+                                    return dist < 0.4; // Strict threshold for confirmation
+                                });
+
+                                if (tempMatch) {
+                                    tempMatch.count++;
+                                    tempMatch.descriptor = d.descriptor; // Update to latest
+                                    
+                                    if (tempMatch.count > 10) { // Confirmed after 10 detections
+                                        color = colors[colorIdx % colors.length];
+                                        const newLabel = `Person ${colorIdx + 1}`;
+                                        colorIdx++;
+                                        labeledDescriptors.push({ 
+                                            label: newLabel, 
+                                            descriptors: [d.descriptor], 
+                                            color: color 
+                                        });
+                                        label = newLabel;
+                                        // Remove from temp
+                                        temporaryTrackings = temporaryTrackings.filter(t => t !== tempMatch);
+                                    } else {
+                                        // Still unknown but counting
+                                        color = '#555555'; // Gray for unconfirmed
+                                    }
+                                } else {
+                                    temporaryTrackings.push({ descriptor: d.descriptor, count: 1 });
+                                    color = '#555555';
+                                }
+                            }
+
+                            return { box: d.detection.box, color: color, label: label };
+                        });
+
+                        // Trigger callbacks based on confirmed labels
+                        const currentConfirmedLabels = new Set(
+                            newDetections.filter(d => d.label !== 'unknown').map(d => d.label)
+                        );
+
+                        // 1. onFaceEntered
+                        currentConfirmedLabels.forEach(label => {
+                            if (!activeFaceLabels.has(label)) {
+                                activeFaceLabels.add(label);
+                                const detection = newDetections.find(d => d.label === label);
+                                onFaceEntered(detection);
+                            }
+                        });
+
+                        // 2. onFaceTracked
+                        newDetections.filter(d => d.label !== 'unknown').forEach(detection => {
+                            onFaceTracked(detection);
+                            facePresenceGrace.set(detection.label, 0); // Reset missing counter
+                        });
+
+                        // 3. onFaceLeft (with grace period to handle transient misses)
+                        activeFaceLabels.forEach(label => {
+                            if (!currentConfirmedLabels.has(label)) {
+                                let missingCount = (facePresenceGrace.get(label) || 0) + 1;
+                                facePresenceGrace.set(label, missingCount);
+
+                                if (missingCount > 15) { // Roughly 1.5 seconds (100ms * 15)
+                                    onFaceLeft(label);
+                                    activeFaceLabels.delete(label);
+                                    facePresenceGrace.delete(label);
+                                }
+                            }
+                        });
+
+                        // Cleanup old temporary trackings (simple way)
+                        if (temporaryTrackings.length > 20) temporaryTrackings.shift();
+
+                        // Smoothing logic: interpolate boxes to reduce flickering
+                        if (lastDetections.length > 0) {
+                            currentDetections = newDetections.map(nd => {
+                                // Find closest box in lastDetections with same color and label
+                                let closest = lastDetections.find(ld => ld.color === nd.color && ld.label === nd.label);
+                                if (closest) {
+                                    const lerp = (a, b, t) => a + (b - a) * t;
+                                    const alpha = 0.5; // Smoothing factor
+                                    return {
+                                        color: nd.color,
+                                        label: nd.label,
+                                        box: {
+                                            x: lerp(closest.box.x, nd.box.x, alpha),
+                                            y: lerp(closest.box.y, nd.box.y, alpha),
+                                            width: lerp(closest.box.width, nd.box.width, alpha),
+                                            height: lerp(closest.box.height, nd.box.height, alpha)
+                                        }
+                                    };
+                                }
+                                return nd;
+                            });
+                        } else {
+                            currentDetections = newDetections;
+                        }
+                        lastDetections = currentDetections;
+
+                    } catch (err) {
+                        console.error("Detection error:", err);
+                    }
+                    setTimeout(detect, 100); // Detect every 100ms
+                }
+
+                function loop() {
+                    if (video.paused || video.ended) {
+                        requestAnimationFrame(loop);
+                        return;
+                    }
+
+                    // Match canvas size to window
+                    if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                        canvas.width = window.innerWidth;
+                        canvas.height = window.innerHeight;
+                    }
+
+                    // Ensure video dimensions are available
+                    if (video.videoWidth === 0 || video.videoHeight === 0) {
+                        requestAnimationFrame(loop);
+                        return;
+                    }
+
+                    // Calculate video scaling to cover the canvas (fullscreen)
+                    const videoAspect = video.videoWidth / video.videoHeight;
+                    const canvasAspect = canvas.width / canvas.height;
+                    let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
+
+                    if (canvasAspect > videoAspect) {
+                        drawWidth = canvas.width;
+                        drawHeight = canvas.width / videoAspect;
+                        offsetY = (canvas.height - drawHeight) / 2;
+                    } else {
+                        drawHeight = canvas.height;
+                        drawWidth = canvas.height * videoAspect;
+                        offsetX = (canvas.width - drawWidth) / 2;
+                    }
+
+                    // Draw video frame
+                    ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+
+                    // Draw squares for current detections
+                    const scaleX = drawWidth / video.videoWidth;
+                    const scaleY = drawHeight / video.videoHeight;
+
+                    currentDetections.forEach(detection => {
+                        const { x, y, width, height } = detection.box;
+                        const scaledX = x * scaleX + offsetX;
+                        const scaledY = y * scaleY + offsetY;
+                        const scaledWidth = width * scaleX;
+                        const scaledHeight = height * scaleY;
+
+                        ctx.strokeStyle = detection.color || '#00ff00';
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
+
+                        // Draw label background
+                        ctx.fillStyle = detection.color || '#00ff00';
+                        const text = detection.label === 'unknown' ? 'Identifying...' : detection.label;
+                        ctx.font = 'bold 16px Arial';
+                        const textWidth = ctx.measureText(text).width;
+                        ctx.fillRect(scaledX, scaledY - 25, textWidth + 10, 25);
+
+                        // Draw label text
+                        ctx.fillStyle = '#000000';
+                        ctx.fillText(text, scaledX + 5, scaledY - 7);
+                    });
+
+                    requestAnimationFrame(loop);
+                }
+                
+                detect();
+                loop();
+            });
+        }
+
+        window.onload = setup;
+    </script>
+</body>
+</html>

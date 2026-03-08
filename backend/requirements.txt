@@ -1,0 +1,7 @@
+django
+channels
+daphne
+django-cors-headers
+openai-whisper
+numpy
+scipy
