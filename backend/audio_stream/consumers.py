@@ -200,7 +200,7 @@ class AudioConsumer(AsyncWebsocketConsumer):
                 await self.send(text_data=json.dumps({
                     'type': 'face_recognized',
                     'label': label,
-                    'name': existing_face.name or label,
+                    'name': existing_face.name or 'Identifying...',
                     'metadata': existing_face.metadata or []
                 }))
             else:
