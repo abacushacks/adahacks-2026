@@ -74,7 +74,7 @@ Over **55 million** people worldwide live with dementia, projected to hit **139 
 - Python 3.9+
 - pip
 - A modern browser (Chrome recommended)
-- Zen API key ([get one here](https://opencode.ai))
+- AUTH API key ([get one here](https://opencode.ai))
 
 ### Installation
 
@@ -90,8 +90,8 @@ pip install -r requirements.txt
 # Run migrations
 python3 manage.py migrate
 
-# Set your Zen API key
-export ZEN_KEY="your-zen-api-key"
+# Set your AUTH API key
+export _KEY="your--api-key"
 
 # Start the server
 python3 manage.py runserver
