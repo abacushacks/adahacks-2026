@@ -32,6 +32,11 @@ class AudioConsumer(AsyncWebsocketConsumer):
         """
         Handles WebSocket connection.
         """
+        # Join face_updates group
+        await self.channel_layer.group_add(
+            'face_updates',
+            self.channel_name
+        )
         await self.accept()
         logger.info("Audio WebSocket connected")
 
@@ -39,6 +44,11 @@ class AudioConsumer(AsyncWebsocketConsumer):
         """
         Handles WebSocket disconnection.
         """
+        # Leave face_updates group
+        await self.channel_layer.group_discard(
+            'face_updates',
+            self.channel_name
+        )
         logger.info(f"Audio WebSocket disconnected: {close_code}")
 
     async def receive(self, text_data: Optional[str] = None, bytes_data: Optional[bytes] = None) -> None:
@@ -208,3 +218,14 @@ class AudioConsumer(AsyncWebsocketConsumer):
                 logger.info(f"New face stored: {label}")
         except Exception as e:
             logger.exception(f"Error handling face descriptor: {e}")
+
+    async def face_update(self, event: Dict[str, Any]) -> None:
+        """
+        Handles face updates broadcasted from the database signal.
+        """
+        await self.send(text_data=json.dumps({
+            'type': 'face_recognized',
+            'label': event['label'],
+            'name': event['name'],
+            'metadata': event['metadata']
+        }))
