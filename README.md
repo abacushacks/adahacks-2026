@@ -1,3 +1,6 @@
+<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/3a0f13d8-1c60-4fdb-9a29-208d25ed982a" />
+
+
 <p align="center">
   <h1 align="center">Faces</h1>
   <p align="center"><strong>Real-time AI memory aid for people with dementia, face blindness, and memory impairment.</strong></p>
