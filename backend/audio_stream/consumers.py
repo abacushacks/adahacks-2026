@@ -1,4 +1,5 @@
 import json
+import re
 import logging
 import asyncio
 import numpy as np
@@ -10,6 +11,7 @@ from asgiref.sync import sync_to_async
 from . import constants
 from .services import AudioProcessingService, TranscriptionService, FaceService
 from .gemini_service import GeminiService
+from .models import Face
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,7 @@ class AudioConsumer(AsyncWebsocketConsumer):
         self.last_transcribed_text: str = ""
         self.consecutive_empty_count: int = 0
         self.transcription_history: List[str] = []
+        self.current_face_label: Optional[str] = None
 
     async def connect(self) -> None:
         """
@@ -195,6 +198,67 @@ class AudioConsumer(AsyncWebsocketConsumer):
         if len(self.transcription_history) > constants.MAX_TRANSCRIPTION_HISTORY:
             self.transcription_history.pop(0)
 
+        # Extract name from speech and update face
+        await self._check_for_name_introduction(text)
+
+    def _extract_name(self, text: str) -> Optional[str]:
+        """
+        Extracts a person's name from speech like 'My name is John' or 'I'm Sarah'.
+        """
+        patterns = [
+            r"(?:my name is|i'm|i am|they call me|call me|this is|it's|im)\s+([A-Z][a-z]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip().capitalize()
+                # Filter out common false positives
+                if name.lower() not in ('the', 'a', 'an', 'not', 'so', 'just', 'like', 'very', 'also', 'here', 'there', 'going', 'working', 'doing', 'good', 'fine', 'okay'):
+                    return name
+        return None
+
+    async def _check_for_name_introduction(self, text: str) -> None:
+        """
+        Checks transcription for name introductions and updates the face in DB.
+        """
+        name = self._extract_name(text)
+        if not name or not self.current_face_label:
+            return
+
+        logger.info(f"Name detected: '{name}' for face '{self.current_face_label}'")
+
+        try:
+            # Find the face by label and update its name
+            face = await sync_to_async(lambda: Face.objects.filter(label=self.current_face_label).first())()
+            if not face:
+                return
+
+            face.name = name
+            await sync_to_async(face.save)(update_fields=['name'])
+            logger.info(f"Updated face '{self.current_face_label}' name to '{name}'")
+
+            # Re-run Gemini with the new name for better context
+            gemini_context = await GeminiService.get_context(face)
+            relationship = gemini_context.get('relationship', face.relationship or 'Known Person')
+            context = gemini_context.get('context', 'No recent conversations recorded.')
+
+            # Save relationship if updated
+            if relationship and relationship != face.relationship:
+                face.relationship = relationship
+                await sync_to_async(face.save)(update_fields=['relationship'])
+
+            # Push the update to the frontend
+            await self.send(text_data=json.dumps({
+                'type': 'face_recognized',
+                'label': self.current_face_label,
+                'name': name,
+                'metadata': face.metadata or [],
+                'relationship': relationship,
+                'context': context
+            }))
+        except Exception as e:
+            logger.exception(f"Error updating face name: {e}")
+
     async def handle_face_descriptor(self, data: Dict[str, Any]) -> None:
         """
         Handles incoming face descriptors for registration or recognition.
@@ -224,6 +288,9 @@ class AudioConsumer(AsyncWebsocketConsumer):
                     existing_face.relationship = relationship
                     await sync_to_async(existing_face.save)(update_fields=['relationship'])
                 
+                # Track which face is currently active for name extraction
+                self.current_face_label = existing_face.label
+
                 await self.send(text_data=json.dumps({
                     'type': 'face_recognized',
                     'label': label,
