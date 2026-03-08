@@ -1,4 +1,5 @@
-body, html {
+body,
+html {
     margin: 0;
     padding: 0;
     width: 100%;
@@ -23,7 +24,8 @@ body, html {
 
 .face-popup {
     position: absolute;
-    background: rgba(18, 25, 23, 0.95); /* Deep dark forest green/black as in the image */
+    background: rgba(18, 25, 23, 0.95);
+    /* Deep dark forest green/black as in the image */
     color: white;
     padding: 20px;
     border-radius: 15px;
@@ -32,49 +34,38 @@ body, html {
     pointer-events: none;
     width: 250px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.8);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
 }
 
-.popup-header {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: rgba(255, 255, 255, 0.6);
-    margin-bottom: 8px;
+.popup-name-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
 }
 
 .popup-name {
     font-size: 24px;
     font-weight: bold;
-    margin-bottom: 4px;
+    color: white;
 }
 
-.popup-status {
-    color: #dfb15b; /* Golden color from image */
-    font-size: 14px;
-    font-weight: 500;
-    margin-bottom: 12px;
+.popup-relationship-badge {
+    display: inline-block;
+    background: #2a9d8f;
+    color: white;
+    padding: 3px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
 }
 
-.popup-memories {
-    margin: 0;
-    padding-left: 0;
-    list-style: none;
+.popup-context {
     font-size: 14px;
     color: rgba(255, 255, 255, 0.85);
-}
-
-.popup-memories li {
-    position: relative;
-    padding-left: 20px;
-    margin-bottom: 8px;
-}
-
-.popup-memories li::before {
-    content: "•";
-    position: absolute;
-    left: 0;
-    color: rgba(255, 255, 255, 0.6);
+    line-height: 1.5;
 }
 
 #controls {
@@ -83,7 +74,7 @@ body, html {
     left: 10px;
     z-index: 100;
     color: white;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0, 0, 0, 0.5);
     padding: 10px;
     border-radius: 5px;
     font-family: Arial, sans-serif;

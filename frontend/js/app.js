@@ -14,14 +14,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     audioManager.onFaceRecognized = (data) => {
         console.log("[Face] Recognized:", data.label, data.name);
-        faceTracker.updatePersonData(data.label, data.name, data.metadata);
+        faceTracker.updatePersonData(data.label, data.name, data.metadata, data.relationship, data.context);
     };
 
     // Setup Webcam & Audio
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
+        const stream = await navigator.mediaDevices.getUserMedia({
             video: { width: 1280, height: 720 },
-            audio: true 
+            audio: true
         });
         video.srcObject = stream;
         audioManager.setupAudioInteraction(stream);
@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             ctx.strokeStyle = '#dfb15b'; // Match the golden/orange color from the image
             ctx.lineWidth = 2;
-            
+
             // Draw rounded rectangle
             const radius = 20;
             ctx.beginPath();
@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     top = window.innerHeight - popupHeight - 10;
                 }
                 if (top < 0) top = 0;
-                
+
                 popup.style.left = `${left}px`;
                 popup.style.top = `${top}px`;
                 popup.style.display = 'block';

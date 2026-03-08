@@ -5,3 +5,4 @@ django-cors-headers
 openai-whisper
 numpy
 scipy
+google-generativeai
