@@ -201,28 +201,29 @@ class AudioConsumer(AsyncWebsocketConsumer):
         if len(self.transcription_history) > constants.MAX_TRANSCRIPTION_HISTORY:
             self.transcription_history.pop(0)
 
-        # Extract name/relationship and key info in PARALLEL for speed
-        await asyncio.gather(
-            self._check_for_name_introduction(text),
-            self._extract_and_push_key_info(text)
-        )
+        # Process LLM steps sequentially — once one succeeds, skip the rest
+        if await self._check_for_name_introduction(text):
+            return
 
-    async def _extract_and_push_key_info(self, text: str) -> None:
+        await self._extract_and_push_key_info(text)
+
+    async def _extract_and_push_key_info(self, text: str) -> bool:
         """
         Extracts important details from transcription and updates the face popup in real-time.
+        Returns True if something was successfully extracted and updated, False otherwise.
         """
         if len(self.active_faces) != 1:
-            return
+            return False
 
         target_label = self.active_faces[0]
         face_id = self.label_to_face_id.get(target_label)
         if not face_id:
-            return
+            return False
 
         try:
             face = await sync_to_async(lambda: Face.objects.filter(id=face_id).first())()
             if not face:
-                return
+                return False
 
             existing_metadata = face.metadata if isinstance(face.metadata, list) else []
 
@@ -231,7 +232,7 @@ class AudioConsumer(AsyncWebsocketConsumer):
 
             # If LLM returned nothing or same list, skip
             if updated_items is None or updated_items == existing_metadata:
-                return
+                return False
 
             # Keep max 10 items
             updated_metadata = updated_items[-10:]
@@ -248,37 +249,40 @@ class AudioConsumer(AsyncWebsocketConsumer):
                 'relationship': face.relationship or 'Known Person',
                 'context': ''
             }))
+            return True
         except Exception as e:
             logger.exception(f"Error extracting key info: {e}")
+            return False
 
-    async def _check_for_name_introduction(self, text: str) -> None:
+    async def _check_for_name_introduction(self, text: str) -> bool:
         """
         Checks transcription for name introductions and updates the face in DB using Zen LLM.
+        Returns True if something was successfully updated, False otherwise.
         """
         if len(self.active_faces) != 1:
             if len(self.active_faces) > 1:
                 logger.info(f"Multiple faces on screen ({self.active_faces}). Skipping name update.")
-            return
+            return False
 
         target_label = self.active_faces[0]
         face_id = self.label_to_face_id.get(target_label)
         if not face_id:
             logger.warning(f"No face ID found for active label '{target_label}'")
-            return
+            return False
 
         parsed_data = await ZenService.parse_name_from_text(text)
         name = parsed_data.get('name')
         relationship = parsed_data.get('relationship')
         
         if not name and not relationship:
-            return
+            return False
 
         logger.info(f"Parsed from speech — name: '{name}', relationship: '{relationship}' for face '{target_label}'")
 
         try:
             face = await sync_to_async(lambda: Face.objects.filter(id=face_id).first())()
             if not face:
-                return
+                return False
 
             update_fields = []
 
@@ -295,17 +299,10 @@ class AudioConsumer(AsyncWebsocketConsumer):
             if update_fields:
                 await sync_to_async(face.save)(update_fields=update_fields)
 
-            # Push the update to the frontend
-            await self.send(text_data=json.dumps({
-                'type': 'face_recognized',
-                'label': target_label,
-                'name': face.name or target_label,
-                'metadata': face.metadata or [],
-                'relationship': face.relationship or 'Known Person',
-                'context': ''
-            }))
+            return True
         except Exception as e:
             logger.exception(f"Error updating face name/relationship: {e}")
+            return False
 
     async def handle_face_descriptor(self, data: Dict[str, Any]) -> None:
         """
@@ -360,12 +357,27 @@ class AudioConsumer(AsyncWebsocketConsumer):
     async def face_update(self, event: Dict[str, Any]) -> None:
         """
         Handles face updates broadcasted from the database signal.
+        Finds the session-specific label for the updated face_id.
         """
+        face_id = event.get('face_id')
+        if not face_id:
+            return
+
+        # Find which local label maps to this face_id
+        target_label = None
+        for label, fid in self.label_to_face_id.items():
+            if fid == face_id:
+                target_label = label
+                break
+
+        if not target_label:
+            return
+
         await self.send(text_data=json.dumps({
             'type': 'face_recognized',
-            'label': event['label'],
+            'label': target_label,
             'name': event['name'],
             'metadata': event['metadata'],
             'relationship': event.get('relationship', 'Known Person'),
-            'context': event.get('context', 'No recent conversations recorded.')
+            'context': ''
         }))

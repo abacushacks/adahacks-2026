@@ -188,8 +188,8 @@ Your job: maintain a list of important, memorable details. You will be given wha
 
 IMPORTANT RULES:
 - If new info UPDATES or CORRECTS an existing item, REPLACE the old one (e.g. if birthday changes, remove the old birthday and add the new one)
+- If the user explicitly asks to FORGET, REMOVE, or DELETE something from the list, remove it.
 - Add genuinely new important details (dates, people, places, events, health, plans)
-- Remove nothing unless it is being corrected/updated by new info
 - Keep each item to ONE short sentence (under 12 words)
 - Do NOT add greetings, filler, small talk, or trivial chat
 - Use warm, simple language

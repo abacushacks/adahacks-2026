@@ -14,8 +14,10 @@ def on_face_updated(sender, instance, **kwargs):
         'face_updates',
         {
             'type': 'face.update',
+            'face_id': instance.id,
             'label': instance.label,
             'name': instance.name or 'Identifying...',
+            'relationship': instance.relationship or 'Known Person',
             'metadata': instance.metadata or []
         }
     )

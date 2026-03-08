@@ -19,7 +19,7 @@ class FaceTracker {
         this.lipOpeningThreshold = 0.05;
 
         this.personData = {
-            'default': { name: 'Identifying...', metadata: ['Profile loading...'], relationship: '', context: '' }
+            'default': { name: 'Identifying...', metadata: ['Profile loading...'], relationship: '' }
         };
 
         this.popupsContainer = document.getElementById('popups-container');
@@ -45,7 +45,6 @@ class FaceTracker {
         const data = this.personData[label] || this.personData['default'];
         const name = data.name || label;
         const relationship = data.relationship || '';
-        const context = data.context || '';
         const metadata = Array.isArray(data.metadata) ? data.metadata : [];
 
         const relationshipBadge = relationship
@@ -61,34 +60,29 @@ class FaceTracker {
                 <span class="popup-name">${name}</span>
                 ${relationshipBadge}
             </div>
-            <div class="popup-context">${context || 'Analyzing...'}</div>
             ${keyInfoHtml}
         `;
         this.popupsContainer.appendChild(popup);
         this.activePopups.set(label, popup);
     }
 
-    updatePersonData(label, name, metadata, relationship, context) {
+    updatePersonData(label, name, metadata, relationship) {
         const cleanName = name || 'Identifying...';
         const cleanRelationship = relationship || '';
-        const cleanContext = context || '';
 
         this.personData[label] = {
             name: cleanName,
             metadata: metadata || [],
-            relationship: cleanRelationship,
-            context: cleanContext
+            relationship: cleanRelationship
         };
 
         // If a popup is already active for this label, update its content
         const popup = this.activePopups.get(label);
         if (popup) {
             const nameElement = popup.querySelector('.popup-name');
-            const contextElement = popup.querySelector('.popup-context');
             const nameRow = popup.querySelector('.popup-name-row');
 
             if (nameElement) nameElement.textContent = cleanName;
-            if (contextElement) contextElement.textContent = cleanContext || 'Analyzing...';
 
             // Update or add relationship badge
             if (nameRow) {

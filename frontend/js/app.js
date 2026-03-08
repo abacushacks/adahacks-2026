@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     audioManager.onFaceRecognized = (data) => {
         console.log("[Face] Recognized:", data.label, data.name);
-        faceTracker.updatePersonData(data.label, data.name, data.metadata, data.relationship, data.context);
+        faceTracker.updatePersonData(data.label, data.name, data.metadata, data.relationship);
     };
 
     // Setup Webcam & Audio
