@@ -45,36 +45,55 @@ class AudioManager {
 
     setupAudioInteraction(stream) {
         const startAudio = async () => {
-            console.log("[Audio] Interaction detected - initializing audio context");
+            console.log("[Audio] Initializing audio context");
             if (this.audioContext && this.audioContext.state === 'running') return;
 
-            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            if (this.audioContext.state === 'suspended') {
-                await this.audioContext.resume();
+            if (!this.audioContext) {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
 
-            this.socket.send(JSON.stringify({
-                type: 'config',
-                sampleRate: this.audioContext.sampleRate
-            }));
-
-            let audioStream = stream;
-            let audioTracks = audioStream ? audioStream.getAudioTracks() : [];
-            
-            if (audioTracks.length === 0 || audioTracks[0].readyState === 'ended') {
+            if (this.audioContext.state === 'suspended') {
                 try {
-                    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    await this.audioContext.resume();
+                    console.log("[Audio] AudioContext resumed successfully");
                 } catch (err) {
-                    console.error("[Audio] Could not acquire audio stream:", err);
+                    console.warn("[Audio] AudioContext resume failed (likely needs user interaction):", err);
                     return;
                 }
             }
 
-            this.startProcessor(audioStream);
-            window.removeEventListener('mousedown', startAudio);
+            if (this.audioContext.state === 'running') {
+                this.socket.send(JSON.stringify({
+                    type: 'config',
+                    sampleRate: this.audioContext.sampleRate
+                }));
+
+                let audioStream = stream;
+                let audioTracks = audioStream ? audioStream.getAudioTracks() : [];
+                
+                if (audioTracks.length === 0 || audioTracks[0].readyState === 'ended') {
+                    try {
+                        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    } catch (err) {
+                        console.error("[Audio] Could not acquire audio stream:", err);
+                        return;
+                    }
+                }
+
+                this.startProcessor(audioStream);
+                ['mousedown', 'touchstart', 'keydown'].forEach(event => {
+                    window.removeEventListener(event, startAudio);
+                });
+            }
         };
 
-        window.addEventListener('mousedown', startAudio);
+        // Try to start immediately
+        startAudio();
+
+        // Fallback to interaction if it didn't start (e.g. state still suspended)
+        ['mousedown', 'touchstart', 'keydown'].forEach(event => {
+            window.addEventListener(event, startAudio);
+        });
     }
 
     startProcessor(stream) {
