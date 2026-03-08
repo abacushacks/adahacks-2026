@@ -1,5 +1,4 @@
 import json
-import re
 import logging
 import asyncio
 import numpy as np
@@ -10,7 +9,7 @@ from asgiref.sync import sync_to_async
 
 from . import constants
 from .services import AudioProcessingService, TranscriptionService, FaceService
-from .gemini_service import GeminiService
+from .zen_service import ZenService
 from .models import Face
 
 logger = logging.getLogger(__name__)
@@ -31,7 +30,8 @@ class AudioConsumer(AsyncWebsocketConsumer):
         self.last_transcribed_text: str = ""
         self.consecutive_empty_count: int = 0
         self.transcription_history: List[str] = []
-        self.current_face_label: Optional[str] = None
+        self.active_faces: List[str] = []
+        self.label_to_face_id: Dict[str, int] = {}
 
     async def connect(self) -> None:
         """
@@ -95,6 +95,9 @@ class AudioConsumer(AsyncWebsocketConsumer):
                     await self.process_audio(is_flush=True)
             elif msg_type == 'face_descriptor':
                 await self.handle_face_descriptor(data)
+            elif msg_type == 'active_faces':
+                self.active_faces = data.get('labels', [])
+                logger.info(f"Active faces updated: {self.active_faces}")
         except json.JSONDecodeError:
             logger.error("Failed to decode incoming JSON text data")
         except Exception as e:
@@ -201,46 +204,43 @@ class AudioConsumer(AsyncWebsocketConsumer):
         # Extract name from speech and update face
         await self._check_for_name_introduction(text)
 
-    def _extract_name(self, text: str) -> Optional[str]:
-        """
-        Extracts a person's name from speech like 'My name is John' or 'I'm Sarah'.
-        """
-        patterns = [
-            r"(?:my name is|i'm|i am|they call me|call me|this is|it's|im)\s+([A-Z][a-z]+)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                name = match.group(1).strip().capitalize()
-                # Filter out common false positives
-                if name.lower() not in ('the', 'a', 'an', 'not', 'so', 'just', 'like', 'very', 'also', 'here', 'there', 'going', 'working', 'doing', 'good', 'fine', 'okay'):
-                    return name
-        return None
-
     async def _check_for_name_introduction(self, text: str) -> None:
         """
-        Checks transcription for name introductions and updates the face in DB.
+        Checks transcription for name introductions and updates the face in DB using Zen LLM.
         """
-        name = self._extract_name(text)
-        if not name or not self.current_face_label:
+        if len(self.active_faces) != 1:
+            if len(self.active_faces) > 1:
+                logger.info(f"Multiple faces on screen ({self.active_faces}). Skipping name update.")
             return
 
-        logger.info(f"Name detected: '{name}' for face '{self.current_face_label}'")
+        target_label = self.active_faces[0]
+        face_id = self.label_to_face_id.get(target_label)
+        if not face_id:
+            logger.warning(f"No face ID found for active label '{target_label}'")
+            return
+
+        parsed_data = await ZenService.parse_name_from_text(text)
+        name = parsed_data.get('name')
+        
+        if not name:
+            return
+
+        logger.info(f"Name detected: '{name}' for face '{target_label}' (ID: {face_id})")
 
         try:
-            # Find the face by label and update its name
-            face = await sync_to_async(lambda: Face.objects.filter(label=self.current_face_label).first())()
+            # Find the face by ID and update its name
+            face = await sync_to_async(lambda: Face.objects.filter(id=face_id).first())()
             if not face:
                 return
 
             face.name = name
             await sync_to_async(face.save)(update_fields=['name'])
-            logger.info(f"Updated face '{self.current_face_label}' name to '{name}'")
+            logger.info(f"Updated face '{target_label}' name to '{name}'")
 
-            # Re-run Gemini with the new name for better context
-            gemini_context = await GeminiService.get_context(face)
-            relationship = gemini_context.get('relationship', face.relationship or 'Known Person')
-            context = gemini_context.get('context', 'No recent conversations recorded.')
+            # Re-run Zen with the new name for better context
+            zen_context = await ZenService.get_context(face)
+            relationship = zen_context.get('relationship', face.relationship or 'Known Person')
+            context = zen_context.get('context', 'No recent conversations recorded.')
 
             # Save relationship if updated
             if relationship and relationship != face.relationship:
@@ -250,7 +250,7 @@ class AudioConsumer(AsyncWebsocketConsumer):
             # Push the update to the frontend
             await self.send(text_data=json.dumps({
                 'type': 'face_recognized',
-                'label': self.current_face_label,
+                'label': target_label,
                 'name': name,
                 'metadata': face.metadata or [],
                 'relationship': relationship,
@@ -273,24 +273,22 @@ class AudioConsumer(AsyncWebsocketConsumer):
             existing_face = await FaceService.find_existing_face(descriptor)
             
             if existing_face:
-                # Use stored relationship if available, otherwise call Gemini and save it
+                self.label_to_face_id[label] = existing_face.id
+                # Use stored relationship if available, otherwise call Zen and save it
                 if existing_face.relationship:
-                    # Use stored relationship, still get fresh context from Gemini
-                    gemini_context = await GeminiService.get_context(existing_face)
+                    # Use stored relationship, still get fresh context from Zen
+                    zen_context = await ZenService.get_context(existing_face)
                     relationship = existing_face.relationship
-                    context = gemini_context.get('context', 'No recent conversations recorded.')
+                    context = zen_context.get('context', 'No recent conversations recorded.')
                 else:
-                    # First time — call Gemini and save relationship to DB
-                    gemini_context = await GeminiService.get_context(existing_face)
-                    relationship = gemini_context.get('relationship', 'Known Person')
-                    context = gemini_context.get('context', 'No recent conversations recorded.')
+                    # First time — call Zen and save relationship to DB
+                    zen_context = await ZenService.get_context(existing_face)
+                    relationship = zen_context.get('relationship', 'Known Person')
+                    context = zen_context.get('context', 'No recent conversations recorded.')
                     # Persist relationship to DB
                     existing_face.relationship = relationship
                     await sync_to_async(existing_face.save)(update_fields=['relationship'])
                 
-                # Track which face is currently active for name extraction
-                self.current_face_label = existing_face.label
-
                 await self.send(text_data=json.dumps({
                     'type': 'face_recognized',
                     'label': label,
@@ -300,7 +298,8 @@ class AudioConsumer(AsyncWebsocketConsumer):
                     'context': context
                 }))
             else:
-                await FaceService.create_face(label, descriptor)
+                new_face = await FaceService.create_face(label, descriptor)
+                self.label_to_face_id[label] = new_face.id
                 logger.info(f"New face stored: {label}")
         except Exception as e:
             logger.exception(f"Error handling face descriptor: {e}")
