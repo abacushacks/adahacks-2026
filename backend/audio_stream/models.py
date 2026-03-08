@@ -8,6 +8,8 @@ class Face(models.Model):
     """
     label = models.CharField(max_length=100)
     descriptor = models.TextField()  # Stored as JSON string (Float32Array)
+    name = models.CharField(max_length=100, blank=True)
+    metadata = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def set_descriptor(self, data: List[float]) -> None:

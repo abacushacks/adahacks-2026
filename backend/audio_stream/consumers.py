@@ -198,8 +198,10 @@ class AudioConsumer(AsyncWebsocketConsumer):
             
             if existing_face:
                 await self.send(text_data=json.dumps({
-                    'type': 'debug',
-                    'message': f"Face '{label}' is already stored in the database."
+                    'type': 'face_recognized',
+                    'label': label,
+                    'name': existing_face.name or label,
+                    'metadata': existing_face.metadata or []
                 }))
             else:
                 await FaceService.create_face(label, descriptor)

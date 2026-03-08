@@ -8,6 +8,7 @@ class AudioManager {
         this.holdTime = 1500;
         this.onTranscription = null;
         this.onDebug = null;
+        this.onFaceRecognized = null;
     }
 
     connect() {
@@ -25,6 +26,8 @@ class AudioManager {
                     this.onTranscription(data.text);
                 } else if (data.type === 'debug' && this.onDebug) {
                     this.onDebug(data.message);
+                } else if (data.type === 'face_recognized' && this.onFaceRecognized) {
+                    this.onFaceRecognized(data);
                 }
             } catch (err) {
                 // Not a JSON message

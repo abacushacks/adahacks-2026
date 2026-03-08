@@ -12,6 +12,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const faceTracker = new FaceTracker(video, canvas, audioManager);
     await faceTracker.loadModels();
 
+    audioManager.onFaceRecognized = (data) => {
+        console.log("[Face] Recognized:", data.label, data.name);
+        faceTracker.updatePersonData(data.label, data.name, data.metadata);
+    };
+
     // Setup Webcam & Audio
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 

@@ -19,10 +19,7 @@ class FaceTracker {
         this.lipOpeningThreshold = 0.05;
 
         this.personData = {
-            'Person 1': ['Software Engineer', 'Likes Coffee', 'AdaHacks Participant'],
-            'Person 2': ['Data Scientist', 'Enjoys Hiking', 'Mountain View local'],
-            'Person 3': ['UI Designer', 'Loves Typography', 'Remote Worker'],
-            'default': ['Unknown Attendee', 'AdaHacks 2026', 'Profile loading...']
+            'default': { name: 'Identifying...', metadata: ['Profile loading...'] }
         };
 
         this.popupsContainer = document.getElementById('popups-container');
@@ -46,17 +43,40 @@ class FaceTracker {
         popup.className = 'face-popup';
         // popup.style.borderColor = detection.color; // Removing direct border color if we want to follow the image style which has a darker border or no border
         
-        const info = this.personData[label] || this.personData['default'];
+        const data = this.personData[label] || this.personData['default'];
+        const name = data.name || label;
+        const metadata = Array.isArray(data.metadata) ? data.metadata : (data.metadata ? [data.metadata] : []);
+
         popup.innerHTML = `
             <div class="popup-header">RECOGNIZED PERSON</div>
-            <div class="popup-name">${label}</div>
+            <div class="popup-name">${name}</div>
             <div class="popup-status">Relationship not learned yet</div>
             <ul class="popup-memories">
-                ${info.map(i => `<li>${i}</li>`).join('')}
+                ${metadata.map(i => `<li>${i}</li>`).join('')}
             </ul>
         `;
         this.popupsContainer.appendChild(popup);
         this.activePopups.set(label, popup);
+    }
+
+    updatePersonData(label, name, metadata) {
+        // If metadata is null or empty, use a placeholder
+        const cleanMetadata = (Array.isArray(metadata) && metadata.length > 0) ? metadata : ['Profile loading...'];
+        const cleanName = name || 'Identifying...';
+        
+        this.personData[label] = { name: cleanName, metadata: cleanMetadata };
+        
+        // If a popup is already active for this label, update its content
+        const popup = this.activePopups.get(label);
+        if (popup) {
+            const nameElement = popup.querySelector('.popup-name');
+            const memoriesElement = popup.querySelector('.popup-memories');
+            
+            if (nameElement) nameElement.textContent = cleanName;
+            if (memoriesElement) {
+                memoriesElement.innerHTML = cleanMetadata.map(i => `<li>${i}</li>`).join('');
+            }
+        }
     }
 
     onFaceTracked(detection) {
