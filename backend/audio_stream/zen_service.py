@@ -24,15 +24,15 @@ class ZenService:
         """Lazy-loads the OpenAI client."""
         if cls._client is None:
             try:
-                api_key = os.environ.get('ZEN_KEY', '')
+                api_key = os.environ.get('AUTH_KEY', '')
                 if not api_key:
-                    logger.warning("ZEN_KEY not set. Zen enrichment will be skipped.")
+                    logger.warning("KEY not set. Zen enrichment will be skipped.")
                     return None
                 cls._client = OpenAI(
                     api_key=api_key,
-                    base_url="https://opencode.ai/zen/v1"
+                    base_url=os.environ.get("ROUTE", "https://opencode.ai/zen/v1")
                 )
-                logger.info("Zen OpenAI client initialized successfully.")
+                logger.info("OpenAI-compatible client initialized successfully.")
             except Exception as e:
                 logger.exception(f"Failed to initialize Zen OpenAI client: {e}")
                 return None
