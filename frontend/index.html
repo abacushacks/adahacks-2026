@@ -27,11 +27,48 @@
             height: 100vh;
             object-fit: cover;
         }
+
+        .face-popup {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            z-index: 50;
+            pointer-events: none;
+            width: 200px;
+            border: 2px solid;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        .face-popup h3 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+            padding-bottom: 4px;
+        }
+
+        .face-popup ul {
+            margin: 0;
+            padding-left: 18px;
+            font-size: 13px;
+        }
+
+        .face-popup ul li {
+            margin-bottom: 4px;
+        }
     </style>
 </head>
 <body>
     <video id="video" autoplay muted playsinline></video>
     <canvas id="canvas"></canvas>
+    <div id="popups-container"></div>
+    <div id="controls" style="position: absolute; top: 10px; left: 10px; z-index: 100; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-family: Arial, sans-serif;">
+        <label for="holdTime" style="font-size: 14px;">Hold Time (ms): </label>
+        <input type="number" id="holdTime" value="1500" step="100" style="width: 60px; background: #333; color: white; border: 1px solid #555; padding: 2px 5px; border-radius: 3px;">
+        <div id="gateStatus" style="margin-top: 5px; font-size: 14px;">Audio Gate: <span id="gateIndicator" style="color: #ff4444; font-weight: bold;">CLOSED</span></div>
+    </div>
 
     <script>
         async function setup() {
@@ -64,12 +101,15 @@
             // Audio WebSocket Setup
             const socket = new WebSocket('ws://localhost:8000/ws/audio/');
             let audioContext;
+            let lastSpeechTime = 0;
+            const LIP_OPENING_THRESHOLD = 0.05; // Vertical distance between upper and lower inner lips
             
             socket.onopen = () => {
-                // console.log("[WebSocket] Connected to backend");
+                console.log("[WebSocket] Connected to backend");
                 
                 // Add a simple interaction to ensure AudioContext starts
                 const startAudio = async () => {
+                    console.log("[Audio] Interaction detected - initializing audio context");
                     // console.log("[Audio] Attempting to start AudioContext...");
                     if (audioContext && audioContext.state === 'running') {
                         // console.log("[Audio] AudioContext already running");
@@ -110,31 +150,22 @@
                     processor.connect(audioContext.destination);
 
                     let chunkCount = 0;
+                    let lastGateStatus = false; // Track gate status to detect transition to CLOSED
+
                     processor.onaudioprocess = (e) => {
                         if (socket.readyState === WebSocket.OPEN) {
-                            const inputData = e.inputBuffer.getChannelData(0);
+                            const holdTime = parseInt(document.getElementById('holdTime')?.value) || 1500;
+                            const isGateOpen = Date.now() - lastSpeechTime < holdTime;
                             
-                            // Check for any non-zero signal
-                            let hasSignal = false;
-                            for (let i = 0; i < inputData.length; i++) {
-                                if (inputData[i] !== 0) {
-                                    hasSignal = true;
-                                    break;
-                                }
+                            if (isGateOpen) {
+                                const inputData = e.inputBuffer.getChannelData(0);
+                                socket.send(inputData);
+                            } else if (lastGateStatus) {
+                                // Transition from OPEN to CLOSED - send flush signal
+                                console.log("[Audio] Gate closed - flushing buffer...");
+                                socket.send(JSON.stringify({ type: 'flush' }));
                             }
-                            // if (!hasSignal && chunkCount % 100 === 0) {
-                            //     console.warn("[Audio] Sending silent chunk (all zeros)");
-                            // } else if (hasSignal && chunkCount % 100 === 0) {
-                            //     console.log("[Audio] Sending chunk with signal");
-                            // }
-
-                            socket.send(inputData);
-                            chunkCount++;
-                            // if (chunkCount % 50 === 0) {
-                            //     console.log(`[Audio] Sent ${chunkCount} chunks to backend`);
-                            // }
-                        } else {
-                            // console.warn("[WebSocket] Socket not open, state:", socket.readyState);
+                            lastGateStatus = isGateOpen;
                         }
                     };
                     // console.log("[Audio] Capture started and processor connected");
@@ -150,6 +181,8 @@
                     const data = JSON.parse(e.data);
                     if (data.type === 'transcription') {
                         console.log("[Whisper] " + data.text);
+                    } else if (data.type === 'debug') {
+                        console.log("[Debug] " + data.message);
                     }
                 } catch (err) {
                     // Not a JSON message, might be binary or something else
@@ -176,16 +209,50 @@
                 const colors = ['#00ff00', '#ff0000', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffa500', '#800080'];
                 let colorIdx = 0;
                 let faceMatcher = null;
+                const popupsContainer = document.getElementById('popups-container');
+                const activePopups = new Map(); // label -> HTMLElement
+
+                const personData = {
+                    'Person 1': ['Software Engineer', 'Likes Coffee', 'AdaHacks Participant'],
+                    'Person 2': ['Data Scientist', 'Enjoys Hiking', 'Mountain View local'],
+                    'Person 3': ['UI Designer', 'Loves Typography', 'Remote Worker'],
+                    'default': ['Unknown Attendee', 'AdaHacks 2026', 'Profile loading...']
+                };
 
                 // Tracking callbacks
                 const onFaceEntered = (detection) => {
-                    // console.log(`[Face Entered] ID: ${detection.label}, Color: ${detection.color}`);
+                    const label = detection.label;
+                    if (label === 'unknown') return;
+
+                    const popup = document.createElement('div');
+                    popup.className = 'face-popup';
+                    popup.style.borderColor = detection.color;
+                    
+                    const info = personData[label] || personData['default'];
+                    popup.innerHTML = `
+                        <h3>${label}</h3>
+                        <ul>
+                            ${info.map(i => `<li>${i}</li>`).join('')}
+                        </ul>
+                    `;
+                    popupsContainer.appendChild(popup);
+                    activePopups.set(label, popup);
                 };
+
                 const onFaceTracked = (detection) => {
-                    // console.log(`[Face Tracked] ID: ${detection.label}`);
+                    const label = detection.label;
+                    if (label === 'unknown') return;
+                    if (!activePopups.has(label)) {
+                        onFaceEntered(detection);
+                    }
                 };
+
                 const onFaceLeft = (label) => {
-                    // console.log(`[Face Left] ID: ${label}`);
+                    const popup = activePopups.get(label);
+                    if (popup) {
+                        popup.remove();
+                        activePopups.delete(label);
+                    }
                 };
 
                 let activeFaceLabels = new Set(); // Currently tracked and confirmed faces
@@ -209,6 +276,13 @@
                         const newDetections = detections.map(d => {
                             let color = '#ffffff';
                             let label = 'unknown';
+
+                            const mouth = d.landmarks.getMouth();
+                            const box = d.detection.box;
+                            const normalizedMouth = mouth.map(p => ({
+                                x: (p.x - box.x) / box.width,
+                                y: (p.y - box.y) / box.height
+                            }));
 
                             if (faceMatcher && labeledDescriptors.length > 0) {
                                 const bestMatch = faceMatcher.findBestMatch(d.descriptor);
@@ -245,6 +319,16 @@
                                             color: color 
                                         });
                                         label = newLabel;
+                                        
+                                        // Send to backend
+                                        if (socket.readyState === WebSocket.OPEN) {
+                                            socket.send(JSON.stringify({
+                                                type: 'face_descriptor',
+                                                label: newLabel,
+                                                descriptor: Array.from(d.descriptor)
+                                            }));
+                                        }
+
                                         // Remove from temp
                                         temporaryTrackings = temporaryTrackings.filter(t => t !== tempMatch);
                                     } else {
@@ -257,9 +341,9 @@
                                 }
                             }
 
-                            return { box: d.detection.box, color: color, label: label };
+                            return { box: d.detection.box, color: color, label: label, normalizedMouth: normalizedMouth };
                         });
-
+                        
                         // Trigger callbacks based on confirmed labels
                         const currentConfirmedLabels = new Set(
                             newDetections.filter(d => d.label !== 'unknown').map(d => d.label)
@@ -294,6 +378,11 @@
                             }
                         });
 
+                        // Hide all popups initially each frame, they will be shown if detection is present in currentDetections
+                        activePopups.forEach(popup => {
+                            popup.style.display = 'none';
+                        });
+
                         // Cleanup old temporary trackings (simple way)
                         if (temporaryTrackings.length > 20) temporaryTrackings.shift();
 
@@ -303,6 +392,19 @@
                                 // Find closest box in lastDetections with same color and label
                                 let closest = lastDetections.find(ld => ld.color === nd.color && ld.label === nd.label);
                                 if (closest) {
+                                    // Detect if speech is occurring based on lip opening
+                                    if (nd.normalizedMouth) {
+                                        // Use inner lip points: indices 12-19 in face-api.js getMouth() result
+                                        // 14 is top-center inner lip (upper), 18 is bottom-center inner lip (lower)
+                                        const upperLip = nd.normalizedMouth[14];
+                                        const lowerLip = nd.normalizedMouth[18];
+                                        const distance = Math.abs(upperLip.y - lowerLip.y);
+                                        
+                                        if (distance > LIP_OPENING_THRESHOLD) {
+                                            lastSpeechTime = Date.now();
+                                        }
+                                    }
+
                                     const lerp = (a, b, t) => a + (b - a) * t;
                                     const alpha = 0.5; // Smoothing factor
                                     return {
@@ -313,7 +415,8 @@
                                             y: lerp(closest.box.y, nd.box.y, alpha),
                                             width: lerp(closest.box.width, nd.box.width, alpha),
                                             height: lerp(closest.box.height, nd.box.height, alpha)
-                                        }
+                                        },
+                                        normalizedMouth: nd.normalizedMouth
                                     };
                                 }
                                 return nd;
@@ -380,6 +483,35 @@
                         ctx.lineWidth = 3;
                         ctx.strokeRect(scaledX, scaledY, scaledWidth, scaledHeight);
 
+                        // Update floating popup
+                        const popup = activePopups.get(detection.label);
+                        if (popup) {
+                            const popupWidth = 200; // Match CSS
+                            const margin = 20;
+                            let left = scaledX + scaledWidth + margin;
+                            
+                            // Check if there is enough room to the right
+                            if (left + popupWidth > window.innerWidth) {
+                                // Move to the left
+                                left = scaledX - popupWidth - margin;
+                            }
+                            
+                            // Ensure it doesn't go off the left edge either
+                            if (left < 0) left = 0;
+
+                            // Ensure it doesn't go off the bottom edge
+                            const popupHeight = popup.offsetHeight || 120; // Estimate if not rendered
+                            let top = scaledY;
+                            if (top + popupHeight > window.innerHeight) {
+                                top = window.innerHeight - popupHeight - 10;
+                            }
+                            if (top < 0) top = 0;
+                            
+                            popup.style.left = `${left}px`;
+                            popup.style.top = `${top}px`;
+                            popup.style.display = 'block';
+                        }
+
                         // Draw label background
                         ctx.fillStyle = detection.color || '#00ff00';
                         const text = detection.label === 'unknown' ? 'Identifying...' : detection.label;
@@ -391,6 +523,19 @@
                         ctx.fillStyle = '#000000';
                         ctx.fillText(text, scaledX + 5, scaledY - 7);
                     });
+
+                    // Update gate indicator UI
+                    const gateIndicator = document.getElementById('gateIndicator');
+                    if (gateIndicator) {
+                        const holdTime = parseInt(document.getElementById('holdTime').value) || 1500;
+                        if (Date.now() - lastSpeechTime < holdTime) {
+                            gateIndicator.textContent = 'OPEN';
+                            gateIndicator.style.color = '#00ff00';
+                        } else {
+                            gateIndicator.textContent = 'CLOSED';
+                            gateIndicator.style.color = '#ff4444';
+                        }
+                    }
 
                     requestAnimationFrame(loop);
                 }
