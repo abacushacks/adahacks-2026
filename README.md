@@ -93,7 +93,7 @@ pip install -r requirements.txt
 python3 manage.py migrate
 
 # Set your AUTH API key
-export API_KEY="your--api-key"
+export AUTH_KEY="your--api-key"
 
 # Start the server
 python3 manage.py runserver
