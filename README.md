@@ -2,7 +2,6 @@
 
 
 <p align="center">
-  <h1 align="center">Faces</h1>
   <p align="center"><strong>Real-time AI memory aid for people with dementia, face blindness, and memory impairment.</strong></p>
   <p align="center">
     <a href="#demo">Demo</a> •
