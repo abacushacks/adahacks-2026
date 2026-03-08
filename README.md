@@ -58,17 +58,6 @@ Over **55 million** people worldwide live with dementia, projected to hit **139 
 
 <a name="how-it-works"></a>
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Browser    │────▶│   Backend    │────▶│  Database   │
-│              │     │              │     │             │
-│ • Camera     │ WS  │ • Whisper    │     │ • Faces     │
-│ • Microphone │◀───▶│ • Zen API    │     │ • Names     │
-│ • face-api   │     │ • Django     │     │ • Relations │
-│ • Canvas     │     │ • Channels   │     │ • Key Info  │
-└─────────────┘     └──────────────┘     └─────────────┘
-```
-
 1. **Camera** captures video → **face-api.js** detects and identifies faces client-side using 128-dim descriptors
 2. **Microphone** streams raw PCM audio over WebSocket → custom audio gate filters silence → **Whisper** transcribes
 3. **Zen API** (LLM) runs two parallel extraction tasks per transcription:
