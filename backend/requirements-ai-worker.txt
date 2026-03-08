@@ -1,0 +1,9 @@
+deepface>=0.0.92
+openai-whisper>=20240930
+opencv-python>=4.10
+numpy>=1.26; python_version >= "3.9"
+numpy>=1.24,<1.25; python_version < "3.9"
+librosa>=0.10
+scipy>=1.13; python_version >= "3.9"
+scipy>=1.10,<1.11; python_version < "3.9"
+Pillow>=10.0
