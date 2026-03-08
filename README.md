@@ -1,5 +1,7 @@
+<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/3a0f13d8-1c60-4fdb-9a29-208d25ed982a" />
+
+
 <p align="center">
-  <h1 align="center">Faces</h1>
   <p align="center"><strong>Real-time AI memory aid for people with dementia, face blindness, and memory impairment.</strong></p>
   <p align="center">
     <a href="#demo">Demo</a> •
@@ -74,7 +76,7 @@ Over **55 million** people worldwide live with dementia, projected to hit **139 
 - Python 3.9+
 - pip
 - A modern browser (Chrome recommended)
-- Zen API key ([get one here](https://opencode.ai))
+- AUTH API key ([get one here](https://opencode.ai))
 
 ### Installation
 
@@ -90,8 +92,8 @@ pip install -r requirements.txt
 # Run migrations
 python3 manage.py migrate
 
-# Set your Zen API key
-export ZEN_KEY="your-zen-api-key"
+# Set your AUTH API key
+export _KEY="your--api-key"
 
 # Start the server
 python3 manage.py runserver
