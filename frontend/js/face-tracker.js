@@ -4,7 +4,7 @@ class FaceTracker {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.audioManager = audioManager;
-        
+
         this.labeledDescriptors = []; // { label, descriptors: Float32Array[], color }
         this.faceMatcher = null;
         this.temporaryTrackings = []; // { descriptor, count }
@@ -13,13 +13,13 @@ class FaceTracker {
         this.facePresenceGrace = new Map();
         this.currentDetections = [];
         this.targets = [];
-        
+
         this.colors = ['#00ff00', '#ff0000', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#ffa500', '#800080'];
         this.colorIdx = 0;
         this.lipOpeningThreshold = 0.05;
 
         this.personData = {
-            'default': { name: 'Identifying...', metadata: ['Profile loading...'] }
+            'default': { name: 'Identifying...', metadata: ['Profile loading...'], relationship: '', context: '' }
         };
 
         this.popupsContainer = document.getElementById('popups-container');
@@ -41,40 +41,62 @@ class FaceTracker {
 
         const popup = document.createElement('div');
         popup.className = 'face-popup';
-        // popup.style.borderColor = detection.color; // Removing direct border color if we want to follow the image style which has a darker border or no border
-        
+
         const data = this.personData[label] || this.personData['default'];
-        const name = data.name || 'Identifying...';
-        const metadata = Array.isArray(data.metadata) ? data.metadata : (data.metadata ? [data.metadata] : []);
+        const name = data.name || label;
+        const relationship = data.relationship || '';
+        const context = data.context || '';
+
+        const relationshipBadge = relationship
+            ? `<span class="popup-relationship-badge">${relationship}</span>`
+            : '';
 
         popup.innerHTML = `
-            <div class="popup-header">RECOGNIZED PERSON</div>
-            <div class="popup-name">${name}</div>
-            <div class="popup-status">Relationship not learned yet</div>
-            <ul class="popup-memories">
-                ${metadata.map(i => `<li>${i}</li>`).join('')}
-            </ul>
+            <div class="popup-name-row">
+                <span class="popup-name">${name}</span>
+                ${relationshipBadge}
+            </div>
+            <div class="popup-context">${context || 'Analyzing...'}</div>
         `;
         this.popupsContainer.appendChild(popup);
         this.activePopups.set(label, popup);
     }
 
-    updatePersonData(label, name, metadata) {
-        // If metadata is null or empty, use a placeholder
-        const cleanMetadata = (Array.isArray(metadata) && metadata.length > 0) ? metadata : ['Profile loading...'];
+    updatePersonData(label, name, metadata, relationship, context) {
         const cleanName = name || 'Identifying...';
-        
-        this.personData[label] = { name: cleanName, metadata: cleanMetadata };
-        
+        const cleanRelationship = relationship || '';
+        const cleanContext = context || '';
+
+        this.personData[label] = {
+            name: cleanName,
+            metadata: metadata || [],
+            relationship: cleanRelationship,
+            context: cleanContext
+        };
+
         // If a popup is already active for this label, update its content
         const popup = this.activePopups.get(label);
         if (popup) {
             const nameElement = popup.querySelector('.popup-name');
-            const memoriesElement = popup.querySelector('.popup-memories');
-            
+            const contextElement = popup.querySelector('.popup-context');
+            const nameRow = popup.querySelector('.popup-name-row');
+
             if (nameElement) nameElement.textContent = cleanName;
-            if (memoriesElement) {
-                memoriesElement.innerHTML = cleanMetadata.map(i => `<li>${i}</li>`).join('');
+            if (contextElement) contextElement.textContent = cleanContext || 'Analyzing...';
+
+            // Update or add relationship badge
+            if (nameRow) {
+                let badge = nameRow.querySelector('.popup-relationship-badge');
+                if (cleanRelationship) {
+                    if (!badge) {
+                        badge = document.createElement('span');
+                        badge.className = 'popup-relationship-badge';
+                        nameRow.appendChild(badge);
+                    }
+                    badge.textContent = cleanRelationship;
+                } else if (badge) {
+                    badge.remove();
+                }
             }
         }
     }
@@ -97,16 +119,16 @@ class FaceTracker {
 
     async detect() {
         if (this.video.paused || this.video.ended) return;
-        
+
         try {
             const detections = await faceapi.detectAllFaces(this.video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
                 .withFaceLandmarks()
                 .withFaceDescriptors();
-            
+
             this.updateFaceMatcher();
 
             const newDetections = detections.map(d => this.processDetection(d));
-            
+
             this.handleFaceTransitions(newDetections);
 
             this.cleanupTemporaryTrackings();
@@ -122,7 +144,7 @@ class FaceTracker {
 
     updateFaceMatcher() {
         if (this.labeledDescriptors.length > 0) {
-            const labeledFaceDescriptors = this.labeledDescriptors.map(ld => 
+            const labeledFaceDescriptors = this.labeledDescriptors.map(ld =>
                 new faceapi.LabeledFaceDescriptors(ld.label, ld.descriptors)
             );
             this.faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
@@ -143,7 +165,7 @@ class FaceTracker {
         if (this.faceMatcher && this.labeledDescriptors.length > 0) {
             const bestMatch = this.faceMatcher.findBestMatch(d.descriptor);
             label = bestMatch.label;
-            
+
             if (label !== 'unknown') {
                 const person = this.labeledDescriptors.find(ld => ld.label === label);
                 color = person.color;
@@ -174,17 +196,17 @@ class FaceTracker {
         if (tempMatch) {
             tempMatch.count++;
             tempMatch.descriptor = d.descriptor;
-            
+
             if (tempMatch.count > 10) {
                 color = this.colors[this.colorIdx % this.colors.length];
-                label = crypto.randomUUID(); // Use a unique ID instead of "Person X"
+                label = `Person ${this.colorIdx + 1}`;
                 this.colorIdx++;
-                this.labeledDescriptors.push({ 
-                    label: label, 
-                    descriptors: [d.descriptor], 
-                    color: color 
+                this.labeledDescriptors.push({
+                    label: label,
+                    descriptors: [d.descriptor],
+                    color: color
                 });
-                
+
                 if (this.audioManager) {
                     this.audioManager.sendFaceDescriptor(label, d.descriptor);
                 }
@@ -271,7 +293,7 @@ class FaceTracker {
             } else {
                 this.currentDetections.push({
                     ...target,
-                    box: { 
+                    box: {
                         x: target.box.x,
                         y: target.box.y,
                         width: target.box.width,

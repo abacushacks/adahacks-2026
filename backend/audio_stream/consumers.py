@@ -8,6 +8,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 
 from . import constants
 from .services import AudioProcessingService, TranscriptionService, FaceService
+from .gemini_service import GeminiService
 
 logger = logging.getLogger(__name__)
 
@@ -207,11 +208,16 @@ class AudioConsumer(AsyncWebsocketConsumer):
             existing_face = await FaceService.find_existing_face(descriptor)
             
             if existing_face:
+                # Enrich metadata with Gemini LLM
+                gemini_context = await GeminiService.get_context(existing_face)
+                
                 await self.send(text_data=json.dumps({
                     'type': 'face_recognized',
                     'label': label,
-                    'name': existing_face.name or 'Identifying...',
-                    'metadata': existing_face.metadata or []
+                    'name': existing_face.name or label,
+                    'metadata': existing_face.metadata or [],
+                    'relationship': gemini_context.get('relationship', 'Known Person'),
+                    'context': gemini_context.get('context', 'No recent conversations recorded.')
                 }))
             else:
                 await FaceService.create_face(label, descriptor)
@@ -227,5 +233,7 @@ class AudioConsumer(AsyncWebsocketConsumer):
             'type': 'face_recognized',
             'label': event['label'],
             'name': event['name'],
-            'metadata': event['metadata']
+            'metadata': event['metadata'],
+            'relationship': event.get('relationship', 'Known Person'),
+            'context': event.get('context', 'No recent conversations recorded.')
         }))
